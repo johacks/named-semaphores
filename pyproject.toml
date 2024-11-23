@@ -1,0 +1,16 @@
+[project]
+name = "easy-posix-ipc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "johacks", email = "joaquinjimenezlc@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "posix-ipc>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
