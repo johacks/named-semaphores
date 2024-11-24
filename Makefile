@@ -20,5 +20,11 @@ test-full: create-virtualenv
 # Run full test-suite with coverage (needs root permissions)
 test-full-coverage: create-virtualenv
 	echo "Running full test coverage"
-	sudo -E env PATH="$(PATH)" uv run pytest --cov=src --cov-report term-missing tests/
+	sudo -E env PATH="$(PATH)" uv run pytest --cov=src --cov-report=xml tests/
 	sudo chown -R $(USER):$(USER) .coverage
+
+# Run full test-suite with coverage (needs root permissions) for Codecov workflow
+test-full-coverage-codecov: create-virtualenv
+	echo "Running full test coverage"
+	sudo -E env PATH="$(PATH)" uv run pytest --cov=src --cov-report=xml tests/
+	sudo chown -R $(USER):$(USER) coverage.xml
