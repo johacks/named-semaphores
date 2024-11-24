@@ -43,11 +43,11 @@ class NamedSemaphore(LoggingMixin):
     ```
 
     To create a new semaphore deleting the previous one if it exists, you can set the `handle_existence`
-    parameter to `DELETE_AND_CREATE`. This will delete the existing semaphore and create
+    parameter to `UNLINK_AND_CREATE`. This will delete the existing semaphore and create
     a new one:
 
     ```
-    my_sem = NamedSemaphore("max_api_calls", handle_existence=NamedSemaphore.Flags.DELETE_AND_CREATE)
+    my_sem = NamedSemaphore("max_api_calls", handle_existence=NamedSemaphore.Flags.UNLINK_AND_CREATE)
     ```
 
     The class provides a context manager interface, which acquires the semaphore on entry and
@@ -79,7 +79,7 @@ class NamedSemaphore(LoggingMixin):
         RAISE_IF_EXISTS = 0
         LINK_OR_CREATE = 1
         RAISE_IF_NOT_EXISTS = 2
-        DELETE_AND_CREATE = 3
+        UNLINK_AND_CREATE = 3
 
     def __init__(
         self,
@@ -95,7 +95,7 @@ class NamedSemaphore(LoggingMixin):
         - `RAISE_IF_EXISTS`: Creates a new semaphore, raises an error if it already exists.
         - `LINK_OR_CREATE`: Links to the existing semaphore if it exists.
         - `RAISE_IF_NOT_EXISTS`: Links to the existing semaphore if it exists, raises an error otherwise.
-        - `DELETE_AND_CREATE`: Deletes the existing semaphore and creates a new one.
+        - `UNLINK_AND_CREATE`: Deletes the existing semaphore and creates a new one.
 
         The semaphore is automatically unlinked when the object is deleted if it was
         created by this handle. Else, the semaphore is only closed.
@@ -109,7 +109,7 @@ class NamedSemaphore(LoggingMixin):
 
         :raises ValueError: If the input parameters are invalid.
         :raises PermissionError: If the semaphore cannot be created (or deleted with
-            `DELETE_AND_CREATE`) due to permissions.
+            `UNLINK_AND_CREATE`) due to permissions.
         :raises FileExistsError: If the semaphore already exists and could not be removed after
             setting `handle_existence` to `RAISE_IF_EXISTS`.
         :raises FileNotFoundError: If the semaphore could not be found after setting
@@ -139,7 +139,7 @@ class NamedSemaphore(LoggingMixin):
             raise ValueError("`handle_existence` must be a NamedSemaphore.Flags enum")
 
         # Check if the semaphore already exists and remove it if flag is set
-        if handle_existence == NamedSemaphore.Flags.DELETE_AND_CREATE:
+        if handle_existence == NamedSemaphore.Flags.UNLINK_AND_CREATE:
             try:
                 self.unlink()
             except FileNotFoundError:

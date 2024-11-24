@@ -130,7 +130,7 @@ def test_link_or_create(semaphore_name):
     assert sem2.linked_existing_semaphore is True
 
 
-def test_delete_and_create(semaphore_name):
+def test_unlink_and_create(semaphore_name):
     # Create first semaphore
     NamedSemaphore(
         semaphore_name,
@@ -139,13 +139,13 @@ def test_delete_and_create(semaphore_name):
     )
 
     # Delete and create new one
-    sem = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.DELETE_AND_CREATE)
+    sem = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.UNLINK_AND_CREATE)
     assert sem.linked_existing_semaphore is False
 
 
-def test_delete_and_create_no_fail_if_not_exists(semaphore_name):
+def test_unlink_and_create_no_fail_if_not_exists(semaphore_name):
     # Delete and create new one
-    sem = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.DELETE_AND_CREATE)
+    sem = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.UNLINK_AND_CREATE)
     assert sem.linked_existing_semaphore is False
 
 
