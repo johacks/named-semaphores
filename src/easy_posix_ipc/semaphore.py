@@ -8,7 +8,6 @@ This module contains a class to handle a POSIX IPC named semaphore.
 
 from enum import Enum
 from numbers import Real
-import sys
 from typing import Optional
 
 import posix_ipc
@@ -16,6 +15,10 @@ from typing_extensions import Self
 
 from easy_posix_ipc.logging import LoggingMixin
 import signal
+
+
+HANDLED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+"""Signals that are handled by the signal handler."""
 
 
 class NamedSemaphore(LoggingMixin):
@@ -293,6 +296,8 @@ class NamedSemaphore(LoggingMixin):
             raise PermissionError(f"Permission denied acquiring semaphore {self.name}.") from e
         except OSError as e:
             raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
+        except posix_ipc.SignalError:
+            return False
 
     def release(self, n: int = 1) -> None:
         """
@@ -346,10 +351,7 @@ class NamedSemaphore(LoggingMixin):
         Exit the semaphore context. Releases the semaphore.
         """
         # Try to release the semaphore
-        try:
-            self.release()
-        except Exception as e:
-            self.logger.error(f"Error while releasing semaphore in __exit__: {e}", exc_info=True)
+        self.release()
 
     def __del__(self):
         """
@@ -374,9 +376,8 @@ class NamedSemaphore(LoggingMixin):
 
     def __signal_handler(self, signum, frame):
         """
-        Signal handler for the semaphore. Unlinks the semaphore and exits the process with the
-        standard exit code for the signal. Only unlinked if the `unlink_on_delete` parameter is True.
+        Signal handler for the semaphore. Unlinks semaphore if the `unlink_on_signal` parameter is True.
         """
+        self.logger.info(f"Received signal {signum}. Unlinking semaphore {self.name}.")
         if self.unlink_on_signal:
             self.__cleanup()
-        sys.exit(128 + signum)  # 128+n is the standard exit code for signal n
