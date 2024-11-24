@@ -108,7 +108,8 @@ class NamedSemaphore(LoggingMixin):
             default is None, which evaluates to True if the semaphore was created by this handle.
 
         :raises ValueError: If the input parameters are invalid.
-        :raises PermissionError: If the semaphore cannot be created due to permissions.
+        :raises PermissionError: If the semaphore cannot be created (or deleted with
+            `DELETE_AND_CREATE`) due to permissions.
         :raises FileExistsError: If the semaphore already exists and could not be removed after
             setting `handle_existence` to `RAISE_IF_EXISTS`.
         :raises FileNotFoundError: If the semaphore could not be found after setting
@@ -117,7 +118,7 @@ class NamedSemaphore(LoggingMixin):
         # Save the input parameters
         self._name = "/" + name.removeprefix("/") if isinstance(name, str) else ""
         self._unlink_on_delete = unlink_on_delete
-        self._linked_existing_semaphore = False
+        self._linked_existing_semaphore = None
 
         # Initialize the logger
         LoggingMixin.__init__(self, self._name[1:])
@@ -151,24 +152,26 @@ class NamedSemaphore(LoggingMixin):
                 self._linked_existing_semaphore = True
             except posix_ipc.ExistentialError:
                 raise FileNotFoundError(f"Semaphore '{self.name}' does not exist.")
-        else:
-            # Create the semaphore or link to an existing one based on the flag
+            return
+
+        # Create the semaphore or link to an existing one based on the flag
+        try:
             try:
-                # O_CREX flag will fail if the semaphore already exists
+                # O_CREX flag will fail with ExistentialError if the semaphore already exists
                 self._semaphore_handle = posix_ipc.Semaphore(
                     self.name, posix_ipc.O_CREX, initial_value=initial_value
                 )
-            except posix_ipc.ExistentialError:
+                self._linked_existing_semaphore = False
+            except posix_ipc.ExistentialError:  # Try to link
+                # Link to an existing semaphore
                 self._semaphore_handle = posix_ipc.Semaphore(
                     self.name, posix_ipc.O_CREAT, initial_value=initial_value
                 )
                 self._linked_existing_semaphore = True
                 if handle_existence == NamedSemaphore.Flags.RAISE_IF_EXISTS:
                     raise FileExistsError(f"Semaphore '{self.name}' already exists.")
-            except PermissionError as e:
-                raise PermissionError(
-                    f"Permission denied when trying to open the semaphore {self.name}."
-                ) from e
+        except posix_ipc.PermissionsError as e:
+            raise PermissionError(f"Permission denied creating semaphore {self.name}.") from e
 
     @property
     def name(self) -> str:
@@ -181,12 +184,12 @@ class NamedSemaphore(LoggingMixin):
         return self._name
 
     @property
-    def linked_existing_semaphore(self) -> bool:
+    def linked_existing_semaphore(self) -> Optional[bool]:
         """
         Return whether the semaphore was linked to an existing semaphore on handle creation.
 
-        :return: True if verifies condition, False otherwise.
-        :rtype: bool
+        :return: True if verifies condition, False otherwise. None if not yet verified.
+        :rtype: Optional[bool]
         """
         return self._linked_existing_semaphore
 
@@ -202,7 +205,7 @@ class NamedSemaphore(LoggingMixin):
         """
         if self._unlink_on_delete is not None:
             return self._unlink_on_delete
-        return not self.linked_existing_semaphore
+        return self._linked_existing_semaphore is False
 
     @property
     def value(self) -> int:
@@ -229,8 +232,6 @@ class NamedSemaphore(LoggingMixin):
         :rtype: bool
         :raises ValueError: If the input parameters are invalid.
         :raises NotImplementedError: If the platform does not support timeout and a timeout is provided.
-        :raises PermissionError: If the semaphore cannot be acquired due to permissions.
-        :raises OSError: If a system-level error occurs.
         """
         # Check the input parameters
         if not isinstance(blocking, bool):
@@ -238,29 +239,24 @@ class NamedSemaphore(LoggingMixin):
         if timeout is not None and (not isinstance(timeout, Real) or timeout < 0):
             raise ValueError("If provided, `timeout` must be a positive real number")
 
-        try:  # General error handling for corrupted semaphores
-            acquire_kwargs = {}  # Setting for the default blocking acquire
-            # Non-blocking acquire
-            if not blocking:
-                acquire_kwargs["timeout"] = 0
-                if timeout is not None:
-                    raise ValueError("Cannot specify a timeout if blocking is False")
-            # Blocking acquire with timeout
-            elif timeout is not None:
-                acquire_kwargs["timeout"] = timeout
-                if not posix_ipc.SEMAPHORE_TIMEOUT_SUPPORTED:
-                    raise NotImplementedError("Timeouts are not supported on this platform")
+        acquire_kwargs = {}  # Setting for the default blocking acquire
+        # Non-blocking acquire
+        if not blocking:
+            acquire_kwargs["timeout"] = 0
+            if timeout is not None:
+                raise ValueError("Cannot specify a timeout if blocking is False")
+        # Blocking acquire with timeout
+        elif timeout is not None:
+            acquire_kwargs["timeout"] = timeout
+            if not posix_ipc.SEMAPHORE_TIMEOUT_SUPPORTED:
+                raise NotImplementedError("Timeouts are not supported on this platform")
 
-            # Blocking acquire with timeout
-            try:
-                self._semaphore_handle.acquire(**acquire_kwargs)
-                return True
-            except posix_ipc.BusyError:
-                return False
-        except posix_ipc.PermissionsError as e:
-            raise PermissionError(f"Permission denied acquiring semaphore {self.name}.") from e
-        except OSError as e:
-            raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
+        # Blocking acquire with timeout
+        try:
+            self._semaphore_handle.acquire(**acquire_kwargs)
+            return True
+        except posix_ipc.BusyError:
+            return False
 
     def release(self, n: int = 1) -> None:
         """
@@ -268,21 +264,14 @@ class NamedSemaphore(LoggingMixin):
 
         :param int n: The number of times to release the semaphore. Default is 1.
         :raises ValueError: If `n` is invalid.
-        :raises PermissionError: If the semaphore cannot be released due to permissions.
-        :raises OSError: If a system-level error occurs.
         """
         # Check the input parameters
         if not (isinstance(n, int) and n >= 1):
             raise ValueError("`n` must be a positive integer")
 
         # Release the semaphore
-        try:
-            for _ in range(n):
-                self._semaphore_handle.release()
-        except posix_ipc.PermissionsError as e:
-            raise PermissionError(f"Permission denied releasing semaphore {self.name}.") from e
-        except OSError as e:
-            raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
+        for _ in range(n):
+            self._semaphore_handle.release()
 
     def unlink(self) -> None:
         """
@@ -292,12 +281,15 @@ class NamedSemaphore(LoggingMixin):
         Any other processes linked to this semaphore will lose access to it. Use this method
         cautiously in shared environments.
 
-        :raises FileNotFoundError: If the semaphore cannot be unlinked.
+        :raises FileNotFoundError: If the semaphore cannot be unlinked due to not existing.
+        :raises PermissionError: If the semaphore cannot be unlinked due to permissions.
         """
         try:
             posix_ipc.unlink_semaphore(self.name)
         except posix_ipc.ExistentialError:
             raise FileNotFoundError(f"Semaphore '{self.name}' does not exist.")
+        except posix_ipc.PermissionsError as e:
+            raise PermissionError(f"Permission denied unlinking semaphore {self.name}.") from e
 
     def __enter__(self) -> Self:
         """
@@ -320,20 +312,12 @@ class NamedSemaphore(LoggingMixin):
         """
         Destructor for the class. Unlinks the semaphore if it was created by this handle.
         """
-        try:
-            if self.unlink_on_delete:
-                self.__cleanup()
-        except Exception as e:
-            self.logger.error(f"Error in __del__: {e}", exc_info=True)
-
-    def __cleanup(self):
-        """
-        Helper method to unlink the semaphore.
-        """
+        if not self.unlink_on_delete:
+            return
         try:
             # Unlink the semaphore
             self.unlink()
         except FileNotFoundError:  # Ignore if the semaphore does not exist
             pass
-        except Exception as e:
-            self.logger.error(f"Error during semaphore cleanup: {e}", exc_info=True)
+        except PermissionError:
+            self.logger.warning("Permission denied unlinking semaphore during cleanup.")
