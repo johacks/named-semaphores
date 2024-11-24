@@ -1,4 +1,4 @@
-# Pythonic POSIX IPC API For Named Semaphores
+# Pythonic API for POSIX IPC Named Semaphores
 
 ![License](https://img.shields.io/github/license/johacks/named-semaphores)
 ![PyPI Version](https://img.shields.io/pypi/v/named-semaphores)
