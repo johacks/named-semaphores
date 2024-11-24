@@ -1,6 +1,6 @@
 import pytest
 import posix_ipc
-from easy_posix_ipc.semaphore import NamedSemaphore
+from named_semaphores.semaphore import NamedSemaphore
 import random
 import multiprocessing as mp
 import os

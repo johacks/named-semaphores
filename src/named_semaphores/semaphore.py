@@ -13,7 +13,7 @@ from typing import Optional
 import posix_ipc
 from typing_extensions import Self
 
-from easy_posix_ipc.logging import LoggingMixin
+from named_semaphores.logging import LoggingMixin
 
 
 class NamedSemaphore(LoggingMixin):
