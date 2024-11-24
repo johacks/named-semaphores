@@ -2,6 +2,7 @@
 
 ![License](https://img.shields.io/github/license/johacks/named-semaphores)
 ![PyPI Version](https://img.shields.io/pypi/v/named-semaphores)
+![Dependencies](https://img.shields.io/librariesio/release/pypi/named-semaphores)
 [![Coverage Status](https://codecov.io/gh/johacks/named-semaphores/branch/main/graph/badge.svg)](https://codecov.io/gh/johacks/named-semaphores)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/0c27d0f8d27a468598813292178b4881)](https://app.codacy.com/gh/johacks/named-semaphores/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
