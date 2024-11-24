@@ -1,6 +1,6 @@
 import pytest
 import posix_ipc
-from easy_posix_ipc.semaphore import NamedSemaphore, HANDLED_SIGNALS
+from easy_posix_ipc.semaphore import NamedSemaphore
 import random
 import multiprocessing as mp
 import os
@@ -15,17 +15,15 @@ def semaphore_name():
 
 
 # Helper function to create a semaphore in a separate process and block it
-def create_semaphore_task(semaphore_name, event, unlink_on_signal=None):
+def create_semaphore_task(semaphore_name, event):
     sem = NamedSemaphore(
-        semaphore_name,
-        initial_value=0,
-        handle_existence=NamedSemaphore.Flags.LINK_OR_CREATE,
-        unlink_on_signal=unlink_on_signal,
-        unlink_on_delete=False,  # Don't unlink the semaphore on garbage collection
+        semaphore_name, initial_value=0, handle_existence=NamedSemaphore.Flags.RAISE_IF_EXISTS
     )
     # Signal the main process that semaphore is created
     event.set()
-    sem.acquire(blocking=True)
+    sem.acquire()
+    while True:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -255,49 +253,22 @@ class TestNamedSemaphore:
         sem.__del__()
         posix_ipc.unlink_semaphore(f"/{semaphore_name}")
 
-    @pytest.mark.parametrize("signal_number", list(HANDLED_SIGNALS))
-    def test_unlink_on_signal_auto_mode(self, semaphore_name, signal_number):
+    def test_unlink_on_sigint(self, semaphore_name):
         create_event = mp.Event()
         process = mp.Process(
             target=create_semaphore_task, args=(semaphore_name, create_event), daemon=True
         )
         process.start()
         create_event.wait()
-        os.kill(process.pid, signal_number)
+        os.kill(process.pid, signal.SIGINT)
         process.join()
 
-        # Should raise when trying to unlink non-existent semaphore
+        # Should result in non-zero exit code after KeyboardInterrupt is raised
+        assert process.exitcode == 1
+
+        # As SIGINT is handled with normal exit flow, semaphore should be unlinked during cleanup
         with pytest.raises(posix_ipc.ExistentialError):
             posix_ipc.unlink_semaphore(f"/{semaphore_name}")
-
-    def test_unlink_on_signal_auto_mode_value(self, semaphore_name):
-        # If created semaphore, value should be True
-        sem = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.LINK_OR_CREATE)
-        assert sem.unlink_on_signal is True
-        # If linked to existing semaphore, value should be False
-        sem_2 = NamedSemaphore(semaphore_name, handle_existence=NamedSemaphore.Flags.LINK_OR_CREATE)
-        assert sem_2.unlink_on_signal is False
-        # Override always takes precedence
-        sem_3 = NamedSemaphore(
-            semaphore_name,
-            handle_existence=NamedSemaphore.Flags.LINK_OR_CREATE,
-            unlink_on_signal=True,
-        )
-        assert sem_3.unlink_on_signal is True
-
-    @pytest.mark.parametrize("signal_number", list(HANDLED_SIGNALS))
-    def test_unlink_on_signal_explicit_false(self, semaphore_name, signal_number):
-        create_event = mp.Event()
-        process = mp.Process(
-            target=create_semaphore_task, args=(semaphore_name, create_event, False), daemon=True
-        )
-        process.start()
-        create_event.wait()
-        os.kill(process.pid, signal_number)
-        process.join()
-
-        # Should raise when trying to unlink existent semaphore
-        posix_ipc.unlink_semaphore(f"/{semaphore_name}")
 
     def test_unlink_on_signal_unhandled_signal(self, semaphore_name):
         create_event = mp.Event()
@@ -306,8 +277,9 @@ class TestNamedSemaphore:
         )
         process.start()
         create_event.wait()
-        os.kill(process.pid, signal.SIGKILL)
+        os.kill(process.pid, signal.SIGTERM)
         process.join()
+        assert process.exitcode != 0
 
-        # Should not raise when trying to unlink existent semaphore
+        # Semaphore should not be unlinked as SIGTERM is not handled
         posix_ipc.unlink_semaphore(f"/{semaphore_name}")

@@ -14,11 +14,6 @@ import posix_ipc
 from typing_extensions import Self
 
 from easy_posix_ipc.logging import LoggingMixin
-import signal
-
-
-HANDLED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-"""Signals that are handled by the signal handler."""
 
 
 class NamedSemaphore(LoggingMixin):
@@ -74,9 +69,6 @@ class NamedSemaphore(LoggingMixin):
       overridden by setting the `unlink_on_delete` parameter in the constructor.
     - The semaphore can also be unlinked manually by calling the `unlink` method. This removes the
       semaphore globally, making it inaccessible by its name.
-    - The semaphore can also be unlinked by a signal handler for SIGINT, SIGTERM, and SIGHUP. This
-      handler is set up by default if this object creates the semaphore, but can be overridden by
-      setting the `unlink_on_signal` parameter in the constructor.
     """
 
     class Flags(Enum):
@@ -95,7 +87,6 @@ class NamedSemaphore(LoggingMixin):
         initial_value: int = 1,
         handle_existence: Flags = Flags.RAISE_IF_NOT_EXISTS,
         unlink_on_delete: Optional[bool] = None,
-        unlink_on_signal: Optional[bool] = None,
     ) -> None:
         """
         Create a POSIX IPC named semaphore.
@@ -115,9 +106,6 @@ class NamedSemaphore(LoggingMixin):
         :param Optional[bool] unlink_on_delete: If True, the semaphore will be unlinked when the
             object is deleted or garbage collected. If False, the semaphore will only be closed. The
             default is None, which evaluates to True if the semaphore was created by this handle.
-        :param Optional[bool] unlink_on_signal: If True, the semaphore will be unlinked when the
-            process receives a SIGINT, SIGTERM, or SIGHUP signal. If False, the signal handler will
-            not be set up. The default is None, which evaluates the same as `unlink_on_delete`.
 
         :raises ValueError: If the input parameters are invalid.
         :raises PermissionError: If the semaphore cannot be created due to permissions.
@@ -126,12 +114,16 @@ class NamedSemaphore(LoggingMixin):
         :raises FileNotFoundError: If the semaphore could not be found after setting
             `handle_existence` to `RAISE_IF_NOT_EXISTS`.
         """
-        # Clean the name and initialize the logger
-        name = name.removeprefix("/") if isinstance(name, str) else ""
-        LoggingMixin.__init__(self, name)
+        # Save the input parameters
+        self._name = "/" + name.removeprefix("/") if isinstance(name, str) else ""
+        self._unlink_on_delete = unlink_on_delete
+        self._linked_existing_semaphore = False
+
+        # Initialize the logger
+        LoggingMixin.__init__(self, self._name[1:])
 
         # Check the input parameters
-        if not name or not all(c.isalnum() or c in ("-", "_") for c in name):
+        if not self.name[1:] or not all(c.isalnum() or c in ("-", "_") for c in self.name[1:]):
             raise ValueError(
                 "`name` must be a non-empty string with characters '-', '_' or alphanumeric. "
                 f"Got: {name}"
@@ -144,11 +136,6 @@ class NamedSemaphore(LoggingMixin):
             )
         if not (isinstance(handle_existence, NamedSemaphore.Flags)):
             raise ValueError("`handle_existence` must be a NamedSemaphore.Flags enum")
-
-        # Save the input parameters
-        self._name = "/" + name
-        self._unlink_on_delete = unlink_on_delete
-        self._unlink_on_signal = unlink_on_signal
 
         # Check if the semaphore already exists and remove it if flag is set
         if handle_existence == NamedSemaphore.Flags.DELETE_AND_CREATE:
@@ -171,7 +158,6 @@ class NamedSemaphore(LoggingMixin):
                 self._semaphore_handle = posix_ipc.Semaphore(
                     self.name, posix_ipc.O_CREX, initial_value=initial_value
                 )
-                self._linked_existing_semaphore = False
             except posix_ipc.ExistentialError:
                 self._semaphore_handle = posix_ipc.Semaphore(
                     self.name, posix_ipc.O_CREAT, initial_value=initial_value
@@ -183,11 +169,6 @@ class NamedSemaphore(LoggingMixin):
                 raise PermissionError(
                     f"Permission denied when trying to open the semaphore {self.name}."
                 ) from e
-
-        # Register the signal handler if needed
-        if self.unlink_on_signal:
-            for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-                signal.signal(sig, self.__signal_handler)
 
     @property
     def name(self) -> str:
@@ -221,22 +202,6 @@ class NamedSemaphore(LoggingMixin):
         """
         if self._unlink_on_delete is not None:
             return self._unlink_on_delete
-        return not self.linked_existing_semaphore
-
-    @property
-    def unlink_on_signal(self) -> bool:
-        """
-        Return whether the semaphore will be unlinked when the process receives a SIGINT, SIGTERM,
-        or SIGHUP signal. The default behavior is to set up the signal handler if the semaphore was
-        created by this handle. But can be manually overridden by setting the `unlink_on_signal`
-        parameter in the constructor.
-
-        :return: True if the semaphore will be unlinked when the process receives a signal, False
-            otherwise.
-        :rtype: bool
-        """
-        if self._unlink_on_signal is not None:
-            return self._unlink_on_signal
         return not self.linked_existing_semaphore
 
     @property
@@ -296,8 +261,6 @@ class NamedSemaphore(LoggingMixin):
             raise PermissionError(f"Permission denied acquiring semaphore {self.name}.") from e
         except OSError as e:
             raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
-        except posix_ipc.SignalError:
-            return False
 
     def release(self, n: int = 1) -> None:
         """
@@ -368,16 +331,9 @@ class NamedSemaphore(LoggingMixin):
         Helper method to unlink the semaphore.
         """
         try:
+            # Unlink the semaphore
             self.unlink()
         except FileNotFoundError:  # Ignore if the semaphore does not exist
             pass
         except Exception as e:
             self.logger.error(f"Error during semaphore cleanup: {e}", exc_info=True)
-
-    def __signal_handler(self, signum, frame):
-        """
-        Signal handler for the semaphore. Unlinks semaphore if the `unlink_on_signal` parameter is True.
-        """
-        self.logger.info(f"Received signal {signum}. Unlinking semaphore {self.name}.")
-        if self.unlink_on_signal:
-            self.__cleanup()
