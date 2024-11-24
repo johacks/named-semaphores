@@ -26,6 +26,9 @@ class NamedSemaphore(LoggingMixin):
     environments and relies on the underlying thread-safe POSIX IPC implementation. After creation,
     the semaphore handle is primarily read-only, ensuring thread safety for typical usage.
 
+    This semaphores are supported on Linux, macOS and Windows + Cygwin ≥ 1.7. Note that some features
+    such as timeouts are not supported on all platforms (e.g. macOS).
+
     To create a new semaphore ensuring that it did not exist before, you can set the `handle_existence`
     parameter to `RAISE_IF_EXISTS`. This will raise an error if the semaphore already exists:
 
@@ -130,8 +133,12 @@ class NamedSemaphore(LoggingMixin):
                 "`name` must be a non-empty string with characters '-', '_' or alphanumeric. "
                 f"Got: {name}"
             )
-        if not (isinstance(initial_value, int) and initial_value >= 0):
-            raise ValueError("`initial_value` must be a non-negative integer")
+        if not (
+            isinstance(initial_value, int) and 0 <= initial_value <= posix_ipc.SEMAPHORE_VALUE_MAX
+        ):
+            raise ValueError(
+                f"`initial_value` must be a non-negative integer less than {posix_ipc.SEMAPHORE_VALUE_MAX}"
+            )
         if not (isinstance(handle_existence, NamedSemaphore.Flags)):
             raise ValueError("`handle_existence` must be a NamedSemaphore.Flags enum")
 
@@ -157,9 +164,9 @@ class NamedSemaphore(LoggingMixin):
         else:
             # Create the semaphore or link to an existing one based on the flag
             try:
-                # O_EXCL flag will fail if the semaphore already exists
+                # O_CREX flag will fail if the semaphore already exists
                 self._semaphore_handle = posix_ipc.Semaphore(
-                    self.name, posix_ipc.O_CREAT | posix_ipc.O_EXCL, initial_value=initial_value
+                    self.name, posix_ipc.O_CREX, initial_value=initial_value
                 )
                 self._linked_existing_semaphore = False
             except posix_ipc.ExistentialError:
@@ -209,8 +216,8 @@ class NamedSemaphore(LoggingMixin):
         :return: True if the semaphore will be unlinked when the object is deleted, False otherwise.
         :rtype: bool
         """
-        if self._unlink_on_del is not None:
-            return self._unlink_on_del
+        if self._unlink_on_delete is not None:
+            return self._unlink_on_delete
         return not self.linked_existing_semaphore
 
     @property
@@ -229,6 +236,18 @@ class NamedSemaphore(LoggingMixin):
             return self._unlink_on_signal
         return not self.linked_existing_semaphore
 
+    @property
+    def value(self) -> int:
+        """
+        Return the current value of the semaphore. Not possible on macOS.
+
+        :return: The current value of the semaphore.
+        :rtype: int
+        """
+        if not posix_ipc.SEMAPHORE_VALUE_SUPPORTED:
+            raise NotImplementedError("Operation is not supported on this platform")
+        return self._semaphore_handle.value
+
     def acquire(self, blocking: bool = True, timeout: Optional[Real] = None) -> bool:
         """
         Acquire the semaphore.
@@ -237,40 +256,43 @@ class NamedSemaphore(LoggingMixin):
             the method will return immediately, regardless of whether the semaphore was acquired.
         :param Real timeout: If provided, the method will block for at most `timeout` seconds. If the
             semaphore is not acquired within this time, the method will return False. If not provided,
-            the method will block indefinitely if `blocking` is True.
+            the method will block indefinitely if `blocking` is True. Not supported on macOS.
         :return: True if the semaphore was acquired, False otherwise.
         :rtype: bool
+        :raises ValueError: If the input parameters are invalid.
+        :raises NotImplementedError: If the platform does not support timeout and a timeout is provided.
+        :raises PermissionError: If the semaphore cannot be acquired due to permissions.
+        :raises OSError: If a system-level error occurs.
         """
         # Check the input parameters
         if not isinstance(blocking, bool):
             raise ValueError("`blocking` must be a boolean")
-        if timeout is not None and not isinstance(timeout, Real):
-            raise ValueError("If provided, `timeout` must be a real number")
+        if timeout is not None and (not isinstance(timeout, Real) or timeout < 0):
+            raise ValueError("If provided, `timeout` must be a positive real number")
 
         try:  # General error handling for corrupted semaphores
+            acquire_kwargs = {}  # Setting for the default blocking acquire
             # Non-blocking acquire
             if not blocking:
+                acquire_kwargs["timeout"] = 0
                 if timeout is not None:
                     raise ValueError("Cannot specify a timeout if blocking is False")
-                try:
-                    self._semaphore_handle.acquire(nowait=True)
-                    return True
-                except posix_ipc.BusyError:
-                    return False
-            # Blocking acquire, no timeout
-            if timeout is None:
-                self._semaphore_handle.acquire()
-                return True
+            # Blocking acquire with timeout
+            elif timeout is not None:
+                acquire_kwargs["timeout"] = timeout
+                if not posix_ipc.SEMAPHORE_TIMEOUT_SUPPORTED:
+                    raise NotImplementedError("Timeouts are not supported on this platform")
 
             # Blocking acquire with timeout
             try:
-                self._semaphore_handle.acquire(timeout=timeout)
+                self._semaphore_handle.acquire(**acquire_kwargs)
                 return True
-            except posix_ipc.TimeoutError:
+            except posix_ipc.BusyError:
                 return False
-        except (SystemError, OSError) as e:
-            self.logger.error(f"Error while acquiring: {e}.", exc_info=True)
-            raise
+        except posix_ipc.PermissionsError as e:
+            raise PermissionError(f"Permission denied acquiring semaphore {self.name}.") from e
+        except OSError as e:
+            raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
 
     def release(self, n: int = 1) -> None:
         """
@@ -289,10 +311,8 @@ class NamedSemaphore(LoggingMixin):
         try:
             for _ in range(n):
                 self._semaphore_handle.release()
-        except posix_ipc.PermissionError as e:
-            raise PermissionError(
-                f"Cannot release semaphore {self.name}: Permission denied."
-            ) from e
+        except posix_ipc.PermissionsError as e:
+            raise PermissionError(f"Permission denied releasing semaphore {self.name}.") from e
         except OSError as e:
             raise OSError(f"System error occurred while releasing semaphore {self.name}.") from e
 
