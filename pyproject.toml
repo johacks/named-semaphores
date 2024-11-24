@@ -18,3 +18,8 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=6.0.0",
+]
