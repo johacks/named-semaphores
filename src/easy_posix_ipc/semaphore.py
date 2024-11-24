@@ -312,6 +312,14 @@ class NamedSemaphore(LoggingMixin):
         """
         Destructor for the class. Unlinks the semaphore if it was created by this handle.
         """
+        # Close the semaphore handle
+        if getattr(self, "_semaphore_handle", None) is not None:
+            try:
+                self._semaphore_handle.close()
+            except posix_ipc.ExistentialError:
+                pass
+
+        # Unlink the semaphore if it was created by this handle
         if not self.unlink_on_delete:
             return
         try:
