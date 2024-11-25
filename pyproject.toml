@@ -6,11 +6,34 @@ readme = "README.md"
 authors = [
     { name = "johacks", email = "joaquinjimenezlc@gmail.com" }
 ]
+maintainers = [
+  { name = "johacks", email = "joaquinjimenezlc@gmail.com" }
+]
 requires-python = ">=3.8"
 dependencies = [
     "posix-ipc>=1.0.0",
     "typing-extensions>=4.12.2",
 ]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+[project.urls]
+Repository = "https://github.com/johacks/named-semaphores"
+Issues = "https://github.com/johacks/named-semaphores/issues"
 
 [build-system]
 requires = ["hatchling"]
