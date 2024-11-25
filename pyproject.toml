@@ -1,6 +1,6 @@
 [project]
 name = "named_semaphores"
-version = "1.0.2"
+version = "1.0.3"
 description = "High-level POSIX IPC named semaphores for Python"
 readme = "README.md"
 authors = [
@@ -13,6 +13,19 @@ requires-python = ">=3.8"
 dependencies = [
     "posix-ipc>=1.0.0",
     "typing-extensions>=4.12.2",
+]
+keywords = [
+    "semaphore",
+    "semaphores",
+    "named-semaphore",
+    "named-semaphores",
+    "posix",
+    "ipc",
+    "posix-ipc",
+    "inter-process communication",
+    "threading",
+    "concurrency",
+    "synchronization",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
