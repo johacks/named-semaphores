@@ -1,6 +1,6 @@
 [project]
 name = "named_semaphores"
-version = "1.0.1"
+version = "1.0.2"
 description = "High-level POSIX IPC named semaphores for Python"
 readme = "README.md"
 authors = [
